@@ -7,5 +7,6 @@ zig_cc_binary(
         "@zml//async",
         "@zml//stdx",
         "@zml//zml",
+        "@zml//xlaffi",
     ],
 )

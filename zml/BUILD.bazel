@@ -30,6 +30,7 @@ zig_library(
         "//mlir",
         "//mlir/dialects",
         "//pjrt",
+        "//xlaffi",
         "//runtimes",
         "//stdx",
         "//zml/tokenizer",

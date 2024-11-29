@@ -124,13 +124,13 @@ pub fn sdpa(q_: Tensor, k_: Tensor, v_: Tensor, opts: SdpaOpts) Tensor {
     const op = dialect.stablehlo.custom_call(
         mlir_ctx,
         &.{ q.value(), k.value(), v.value(), bias.value() },
-        .{
+        .{ .legacy = .{
             .call_target_name = "__cudnn$fmhaScaleBiasSoftmax",
             .backend_config = backend_config,
             .api_version = 2,
             .has_side_effect = false,
             .output_operand_aliases = &.{},
-        },
+        } },
         &.{
             mlir.ext.mlirType(mlir_ctx, q.shape()),
             mlir.RankedTensorType.init(&.{0}, mlir.IntegerType(.u8).init(mlir_ctx).as(mlir.Type).?).asType(),
