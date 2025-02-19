@@ -161,8 +161,9 @@ pub const Api = struct {
     }
 
     pub fn customCallRegistry(api: *const Api) ?CustomCallRegistry {
-        if (api.lookupExtension(c.PJRT_Gpu_Custom_Call, c.PJRT_Extension_Type_Gpu_Custom_Call)) |ext| {
-            return .{ .inner = ext.custom_call.? };
+        if (api.lookupExtension(c.PJRT_FFI_Extension, c.PJRT_Extension_Type_FFI)) |ext| {
+            log.err("register handler is {}\n", .{ext});
+            return .{ .inner = ext.register_handler.? };
         }
         // log.warn("No Custom Call registry found for platform: {}", .{self});
         return null;
@@ -1171,29 +1172,17 @@ pub const CustomCall = fn (*anyopaque, [*]*anyopaque, [*]const u8, usize) callco
 // todo : support all missing handlers available in GPU plugin extension: handler_instantiate, handler_prepare, handler_initialize
 // introduced by https://github.com/openxla/xla/commit/ef85a7bcc308313492ebc50295a8a08b4e51b8f5
 pub const CustomCallRegistry = extern struct {
-    inner: *const c.PJRT_Gpu_Register_Custom_Call,
-
-    pub fn registerLegacy(self: *const CustomCallRegistry, api: *const Api, name: []const u8, func: *const CustomCall) ApiError!void {
-        var ret = pjrtStruct(c.PJRT_Gpu_Register_Custom_Call_Args{
-            .function_name = name.ptr,
-            .function_name_size = name.len,
-            .api_version = 0,
-            .handler_execute = @ptrCast(@constCast(func)),
-        });
-        const result = self.inner(&ret);
-        if (result) |pjrt_c_error| {
-            const pjrt_error: *Error = @ptrCast(pjrt_c_error);
-            log.err("[GpuRegisterCustomCall] {s}", .{pjrt_error.getMessage(api)});
-            return pjrt_error.getCode(api).toApiError();
-        }
-    }
+    inner: *const c.PJRT_FFI_Register_Handler,
 
     pub fn registerFfi(self: *const CustomCallRegistry, api: *const Api, name: []const u8, func: *const ffi.Handler) ApiError!void {
-        var ret = pjrtStruct(c.PJRT_Gpu_Register_Custom_Call_Args{
-            .function_name = name.ptr,
-            .function_name_size = name.len,
+        var ret = pjrtStruct(c.PJRT_FFI_Register_Handler_Args{
             .api_version = 1,
-            .handler_execute = @ptrCast(@constCast(func)),
+            .target_name = name.ptr,
+            .target_name_size = name.len,
+            .handler = @ptrCast(@constCast(func)),
+            // can be https://github.com/cerisier/xla/blob/cerisier/test/xla/python/xla_client_test.py#L208
+            .platform_name = "cuda", // cpu, rocm
+            .platform_name_size = "cuda".len,
         });
         const result = self.inner(&ret);
         if (result) |pjrt_c_error| {

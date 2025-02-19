@@ -21,6 +21,7 @@ zig_library(
         ":xplane_proto",
         "//stdx",
         "//xlaffi",
+        "@xla//xla/pjrt/c:pjrt_c_api_ffi_extension_hdrs",
         "@xla//xla/pjrt/c:pjrt_c_api_gpu_extension_hdrs",
         "@xla//xla/pjrt/c:pjrt_c_api_hdrs",
         "@xla//xla/pjrt/c:pjrt_c_api_profiler_extension_hdrs",
