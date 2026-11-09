@@ -19,8 +19,16 @@ public static class DemoConsole {
     }
     [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
     [DllImport("kernel32.dll")] public static extern IntPtr GetStdHandle(int id);
+    [DllImport("kernel32.dll")] public static extern uint GetFileType(IntPtr handle);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern IntPtr CreateFileW(string name, uint access, uint sharing, IntPtr security, uint creation, uint flags, IntPtr template);
+    [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr handle);
+    [DllImport("kernel32.dll")] public static extern bool GetConsoleMode(IntPtr handle, out uint mode);
+    [DllImport("kernel32.dll")] public static extern bool SetConsoleMode(IntPtr handle, uint mode);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
     public static extern bool SetCurrentConsoleFontEx(IntPtr output, bool maximum, ref Font font);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    public static extern bool GetCurrentConsoleFontEx(IntPtr output, bool maximum, ref Font font);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr window, int command);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
 }
@@ -37,7 +45,25 @@ public static class DemoConsole {
     $font.Family = 54
     $font.Weight = 400
     $font.Face = 'Consolas'
-    [void][DemoConsole]::SetCurrentConsoleFontEx([DemoConsole]::GetStdHandle(-11), $false, [ref]$font)
+    # Actions can pass redirected standard handles into a newly opened console.
+    # Open the console itself for font and VT configuration.
+    $consoleOutput = [DemoConsole]::CreateFileW('CONOUT$', 0xC0000000u, 3, [IntPtr]::Zero, 3, 0, [IntPtr]::Zero)
+    if ($consoleOutput -eq [IntPtr]::new(-1)) { throw 'Cannot open console output.' }
+    try {
+        if (-not [DemoConsole]::SetCurrentConsoleFontEx($consoleOutput, $false, [ref]$font)) {
+            throw 'Cannot configure console font.'
+        }
+        if (-not [DemoConsole]::GetCurrentConsoleFontEx($consoleOutput, $false, [ref]$font)) {
+            throw 'Cannot inspect console font.'
+        }
+        [uint32] $mode = 0
+        if (-not [DemoConsole]::GetConsoleMode($consoleOutput, [ref]$mode) -or
+            -not [DemoConsole]::SetConsoleMode($consoleOutput, $mode -bor 4)) {
+            throw 'Cannot enable console VT output.'
+        }
+    } finally {
+        [void][DemoConsole]::CloseHandle($consoleOutput)
+    }
     [void][DemoConsole]::ShowWindow($window, 3)
     [void][DemoConsole]::SetForegroundWindow($window)
     Clear-Host
@@ -46,6 +72,8 @@ public static class DemoConsole {
         sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
         consoleWindow = $window.ToInt64()
         title = $Host.UI.RawUI.WindowTitle
+        font = @{ face = $font.Face; height = $font.Dimensions.Y }
+        standardOutputType = [DemoConsole]::GetFileType([DemoConsole]::GetStdHandle(-11))
     } | ConvertTo-Json | Set-Content (Join-Path $evidence 'terminal.json')
     New-Item -ItemType File (Join-Path $WorkDirectory 'terminal-ready') | Out-Null
     $deadline = [DateTime]::UtcNow.AddSeconds(60)
@@ -69,7 +97,9 @@ public static class DemoConsole {
     Write-Host '      --prompt="What is the capital of France? Answer in one sentence." `' -ForegroundColor White
     Write-Host '      --seqlen=64 --topk=1 --cpu-devices=1' -ForegroundColor White
     Start-Sleep -Seconds 3
-    & .\llm.exe @arguments 2>&1 | Tee-Object -FilePath (Join-Path $evidence 'terminal-inference.log')
+    & .\llm.exe @arguments 2>&1 |
+        ForEach-Object { [regex]::Replace($_.ToString(), '\x1b\[[0-?]*[ -/]*[@-~]', '') } |
+        Tee-Object -FilePath (Join-Path $evidence 'terminal-inference.log')
     $result.exitCode = $LASTEXITCODE
     Write-Host "`nPS> # Process exited with code $($result.exitCode)" -ForegroundColor Green
 } catch {
