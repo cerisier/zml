@@ -128,12 +128,12 @@ public static class DemoConsole {
     Write-Host ''
     $arguments = @(
         '--model=..\model',
-        '--prompt=write a very short story about paris',
-        '--seqlen=256', '--topk=1', '--cpu-devices=1'
+        '--prompt=Write a story about Paris in at most 20 words. Output only the story.',
+        '--seqlen=128', '--topk=1', '--cpu-devices=1'
     )
     Write-Host 'PS> .\llm.exe --model=..\model `' -ForegroundColor White
-    Write-Host '      --prompt="write a very short story about paris" `' -ForegroundColor White
-    Write-Host '      --seqlen=256 --topk=1 --cpu-devices=1' -ForegroundColor White
+    Write-Host '      --prompt="Write a story about Paris in at most 20 words. Output only the story." `' -ForegroundColor White
+    Write-Host '      --seqlen=128 --topk=1 --cpu-devices=1' -ForegroundColor White
     Start-Sleep -Seconds 3
     # Forward available chunks directly: PowerShell's native pipeline waits for lines.
     $result.exitCode = [DemoConsole]::RunStreaming(

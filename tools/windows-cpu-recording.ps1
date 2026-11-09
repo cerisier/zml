@@ -37,7 +37,7 @@ try {
         Start-Sleep -Milliseconds 200
     }
 
-    $video = Join-Path $evidence 'zml-windows-cpu-paris-story.mp4'
+    $video = Join-Path $evidence 'zml-windows-cpu-paris-20-words.mp4'
     $start = [Diagnostics.ProcessStartInfo]::new($ffmpeg)
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true
@@ -79,7 +79,8 @@ foreach ($pattern in @('platform: cpu', 'Compiled prefill forward', 'Compiled de
 }
 $output | Write-Output
 $story = [regex]::Match($output, '(?s)prefill\.\.\.(?<story>.*?)\r?\ndecode\s+').Groups['story'].Value.Trim()
-if (($story -split '\s+').Count -lt 20) { throw 'Generated story is too short for a streaming demonstration.' }
+$wordCount = ($story -split '\s+').Count
+if ($wordCount -lt 3 -or $wordCount -gt 20) { throw "Expected a short story of at most 20 words; got $wordCount." }
 $story | Set-Content (Join-Path $evidence 'generated-story.txt')
 $events = @(Get-Content (Join-Path $evidence 'stdout-events.jsonl') | ForEach-Object { $_ | ConvertFrom-Json })
 $prefix = ''
@@ -99,7 +100,7 @@ if ($generation.Count -lt 3 -or ($generation[-1].elapsedMs - $generation[0].elap
     chunks = $generation.Count
     firstChunkMs = $generation[0].elapsedMs
     lastChunkMs = $generation[-1].elapsedMs
-    words = ($story -split '\s+').Count
+    words = $wordCount
 } | ConvertTo-Json | Set-Content (Join-Path $evidence 'streaming.json')
 $metadata = & $ffprobe -v error -show_format -show_streams -of json $video
 if ($LASTEXITCODE -ne 0) { throw 'Recorded MP4 is invalid.' }
