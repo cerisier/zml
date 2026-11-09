@@ -37,22 +37,23 @@ try {
         Start-Sleep -Milliseconds 200
     }
 
-    $video = Join-Path $evidence 'zml-windows-cpu.mp4'
+    $video = Join-Path $evidence 'zml-windows-cpu-paris-story.mp4'
     $start = [Diagnostics.ProcessStartInfo]::new($ffmpeg)
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true
     $start.RedirectStandardInput = $true
     $start.RedirectStandardError = $true
-    foreach ($argument in @('-y', '-hide_banner', '-loglevel', 'warning', '-f', 'gdigrab', '-framerate', '15', '-draw_mouse', '0', '-i', 'desktop', '-t', '180', '-vf', 'pad=ceil(iw/2)*2:ceil(ih/2)*2', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '18', '-pix_fmt', 'yuv420p', '-threads', '2', '-movflags', '+faststart', $video)) {
+    foreach ($argument in @('-y', '-hide_banner', '-loglevel', 'warning', '-f', 'gdigrab', '-framerate', '15', '-draw_mouse', '0', '-i', 'desktop', '-t', '360', '-vf', 'pad=ceil(iw/2)*2:ceil(ih/2)*2', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '18', '-pix_fmt', 'yuv420p', '-threads', '2', '-movflags', '+faststart', $video)) {
         $start.ArgumentList.Add($argument)
     }
+    $videoStarted = [DateTimeOffset]::UtcNow
     $recorder = [Diagnostics.Process]::Start($start)
     $recorderLog = $recorder.StandardError.ReadToEndAsync()
     Start-Sleep -Seconds 2
     if ($recorder.HasExited) { throw 'Desktop capture failed to start.' }
     New-Item -ItemType File (Join-Path $WorkDirectory 'start-inference') | Out-Null
 
-    $deadline = [DateTime]::UtcNow.AddSeconds(120)
+    $deadline = [DateTime]::UtcNow.AddSeconds(300)
     while (-not (Test-Path (Join-Path $evidence 'terminal-result.json'))) {
         if ($terminal.HasExited -or [DateTime]::UtcNow -gt $deadline) { throw 'Console inference did not finish.' }
         Start-Sleep -Milliseconds 200
@@ -77,6 +78,29 @@ foreach ($pattern in @('platform: cpu', 'Compiled prefill forward', 'Compiled de
     if ($output -notmatch $pattern) { throw "Missing recorded inference evidence: $pattern" }
 }
 $output | Write-Output
+$story = [regex]::Match($output, '(?s)prefill\.\.\.(?<story>.*?)\r?\ndecode\s+').Groups['story'].Value.Trim()
+if (($story -split '\s+').Count -lt 20) { throw 'Generated story is too short for a streaming demonstration.' }
+$story | Set-Content (Join-Path $evidence 'generated-story.txt')
+$events = @(Get-Content (Join-Path $evidence 'stdout-events.jsonl') | ForEach-Object { $_ | ConvertFrom-Json })
+$prefix = ''
+$prefill = $null
+foreach ($event in $events) {
+    $prefix += $event.text
+    if ($prefix.Contains('prefill...')) { $prefill = $event; break }
+}
+if ($null -eq $prefill) { throw 'Missing prefill marker in stdout events.' }
+$generation = @($events | Where-Object {
+    $_.elapsedMs -gt $prefill.elapsedMs -and $_.elapsedMs -lt ($events[-1].elapsedMs - 100) -and $_.text -match '\p{L}'
+})
+if ($generation.Count -lt 3 -or ($generation[-1].elapsedMs - $generation[0].elapsedMs) -lt 1000) {
+    throw 'Did not observe text arriving progressively during generation.'
+}
+@{
+    chunks = $generation.Count
+    firstChunkMs = $generation[0].elapsedMs
+    lastChunkMs = $generation[-1].elapsedMs
+    words = ($story -split '\s+').Count
+} | ConvertTo-Json | Set-Content (Join-Path $evidence 'streaming.json')
 $metadata = & $ffprobe -v error -show_format -show_streams -of json $video
 if ($LASTEXITCODE -ne 0) { throw 'Recorded MP4 is invalid.' }
 $metadata | Set-Content (Join-Path $evidence 'video.json')
@@ -85,5 +109,11 @@ if ($duration -lt 6) { throw "Recording too short: $duration seconds" }
 foreach ($sample in @(@('intro', 3), @('inference', [math]::Max(3, $duration / 2)), @('result', [math]::Max(3, $duration - 2)))) {
     & $ffmpeg -y -hide_banner -loglevel error -ss $sample[1] -i $video -frames:v 1 (Join-Path $evidence "$($sample[0]).png")
     if ($LASTEXITCODE -ne 0) { throw 'Cannot extract recording preview.' }
+}
+for ($i = 1; $i -le 3; $i++) {
+    $event = $generation[[int][math]::Floor(($generation.Count - 1) * $i / 4)]
+    $seconds = ([DateTimeOffset]$event.utc - $videoStarted).TotalSeconds
+    & $ffmpeg -y -hide_banner -loglevel error -ss $seconds -i $video -frames:v 1 (Join-Path $evidence "streaming-$i.png")
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot extract streaming preview.' }
 }
 Write-Host "PASS: captured a real Windows console; MP4 duration $duration seconds."

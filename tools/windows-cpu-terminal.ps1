@@ -7,7 +7,12 @@ $result = @{ exitCode = 1 }
 try {
     Add-Type -TypeDefinition @'
 using System;
+using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.Json;
+using System.Threading.Tasks;
 public static class DemoConsole {
     [StructLayout(LayoutKind.Sequential)] public struct Coord { public short X, Y; }
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -28,6 +33,45 @@ public static class DemoConsole {
     public static extern bool GetCurrentConsoleFontEx(IntPtr output, bool maximum, ref Font font);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr window, int command);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
+
+    public static int RunStreaming(string executable, string[] arguments, string logPath, string eventsPath) {
+        var start = new ProcessStartInfo(executable) {
+            UseShellExecute = false, CreateNoWindow = true,
+            WorkingDirectory = Path.GetDirectoryName(executable),
+            RedirectStandardOutput = true, RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8
+        };
+        foreach (var argument in arguments) start.ArgumentList.Add(argument);
+        using (var process = new Process { StartInfo = start })
+        using (var log = new StreamWriter(logPath, false, new UTF8Encoding(false)))
+        using (var events = new StreamWriter(eventsPath, false, new UTF8Encoding(false))) {
+            var gate = new object();
+            var clock = Stopwatch.StartNew();
+            process.Start();
+            Action<StreamReader, bool> forward = (reader, stdout) => {
+                var buffer = new char[256];
+                int count;
+                while ((count = reader.Read(buffer, 0, buffer.Length)) != 0) {
+                    var text = new string(buffer, 0, count);
+                    lock (gate) {
+                        Console.Out.Write(text);
+                        Console.Out.Flush();
+                        log.Write(text);
+                        log.Flush();
+                        if (stdout) {
+                            events.WriteLine(JsonSerializer.Serialize(new { elapsedMs = clock.ElapsedMilliseconds, utc = DateTimeOffset.UtcNow.ToString("O"), text }));
+                            events.Flush();
+                        }
+                    }
+                }
+            };
+            var output = Task.Run(() => forward(process.StandardOutput, true));
+            var error = Task.Run(() => forward(process.StandardError, false));
+            process.WaitForExit();
+            Task.WaitAll(output, error);
+            return process.ExitCode;
+        }
+    }
 }
 '@
     $window = [DemoConsole]::GetConsoleWindow()
@@ -84,17 +128,19 @@ public static class DemoConsole {
     Write-Host ''
     $arguments = @(
         '--model=..\model',
-        '--prompt=What is the capital of France? Answer in one sentence.',
-        '--seqlen=64', '--topk=1', '--cpu-devices=1'
+        '--prompt=write a very short story about paris',
+        '--seqlen=256', '--topk=1', '--cpu-devices=1'
     )
     Write-Host 'PS> .\llm.exe --model=..\model `' -ForegroundColor White
-    Write-Host '      --prompt="What is the capital of France? Answer in one sentence." `' -ForegroundColor White
-    Write-Host '      --seqlen=64 --topk=1 --cpu-devices=1' -ForegroundColor White
+    Write-Host '      --prompt="write a very short story about paris" `' -ForegroundColor White
+    Write-Host '      --seqlen=256 --topk=1 --cpu-devices=1' -ForegroundColor White
     Start-Sleep -Seconds 3
-    & .\llm.exe @arguments 2>&1 |
-        ForEach-Object { [regex]::Replace($_.ToString(), '\x1b\[[0-?]*[ -/]*[@-~]', '') } |
-        Tee-Object -FilePath (Join-Path $evidence 'terminal-inference.log')
-    $result.exitCode = $LASTEXITCODE
+    # Forward available chunks directly: PowerShell's native pipeline waits for lines.
+    $result.exitCode = [DemoConsole]::RunStreaming(
+        (Join-Path $PWD 'llm.exe'), $arguments,
+        (Join-Path $evidence 'terminal-inference.log'),
+        (Join-Path $evidence 'stdout-events.jsonl')
+    )
     Write-Host "`nPS> # Process exited with code $($result.exitCode)" -ForegroundColor Green
 } catch {
     $result.error = $_.ToString()
