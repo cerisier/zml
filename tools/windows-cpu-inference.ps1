@@ -1,6 +1,7 @@
 param(
     [string] $Manifest = (Join-Path $PSScriptRoot 'windows-cpu-inference.json'),
-    [string] $WorkDirectory = (Join-Path ([IO.Path]::GetTempPath()) 'zml-windows-inference')
+    [string] $WorkDirectory = (Join-Path ([IO.Path]::GetTempPath()) 'zml-windows-inference'),
+    [switch] $PrepareOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -49,6 +50,7 @@ foreach ($file in $config.model.files) {
     Get-VerifiedFile $url (Join-Path $model $file.name) $file.sha256
 }
 $config | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $evidence 'inputs.json')
+if ($PrepareOnly) { return }
 
 # Use the packaged runfiles tree; never inherit paths from the build machine.
 $env:RUNFILES_DIR = Join-Path $runtime 'llm.exe.runfiles'
