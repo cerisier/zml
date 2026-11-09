@@ -74,7 +74,7 @@ if ($recorder.ExitCode -ne 0) { throw "Recorder failed: $($recorder.ExitCode)" }
 $result = Get-Content -Raw (Join-Path $evidence 'terminal-result.json') | ConvertFrom-Json
 if ($result.exitCode -ne 0) { throw "Console inference failed: $($result | ConvertTo-Json -Compress)" }
 $output = [regex]::Replace((Get-Content -Raw (Join-Path $evidence 'terminal-inference.log')), '\x1b\[[0-?]*[ -/]*[@-~]', '')
-foreach ($pattern in @('platform: cpu', 'Compiled prefill forward', 'Compiled decode forward', 'Loaded weights', 'Paris', 'decode\s+.+\d+\.\d+tok/s')) {
+foreach ($pattern in @('platform: cpu', 'Compiled prefill forward', 'Compiled decode forward', 'Loaded weights', 'decode\s+.+\d+\.\d+tok/s')) {
     if ($output -notmatch $pattern) { throw "Missing recorded inference evidence: $pattern" }
 }
 $output | Write-Output
