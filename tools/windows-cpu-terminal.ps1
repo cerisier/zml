@@ -20,9 +20,6 @@ public static class DemoConsole {
     [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
     [DllImport("kernel32.dll")] public static extern IntPtr GetStdHandle(int id);
     [DllImport("kernel32.dll")] public static extern uint GetFileType(IntPtr handle);
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    public static extern IntPtr CreateFileW(string name, uint access, uint sharing, IntPtr security, uint creation, uint flags, IntPtr template);
-    [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr handle);
     [DllImport("kernel32.dll")] public static extern bool GetConsoleMode(IntPtr handle, out uint mode);
     [DllImport("kernel32.dll")] public static extern bool SetConsoleMode(IntPtr handle, uint mode);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
@@ -41,28 +38,25 @@ public static class DemoConsole {
     $Host.UI.RawUI.ForegroundColor = 'Gray'
     $font = [DemoConsole+Font]::new()
     $font.Size = [Runtime.InteropServices.Marshal]::SizeOf($font)
-    $font.Dimensions.Y = 18
+    # Coord is a value type: mutating $font.Dimensions.Y changes a copy.
+    $dimensions = [DemoConsole+Coord]::new()
+    $dimensions.Y = 18
+    $font.Dimensions = $dimensions
     $font.Family = 54
     $font.Weight = 400
     $font.Face = 'Consolas'
-    # Actions can pass redirected standard handles into a newly opened console.
-    # Open the console itself for font and VT configuration.
-    $consoleOutput = [DemoConsole]::CreateFileW('CONOUT$', 0xC0000000u, 3, [IntPtr]::Zero, 3, 0, [IntPtr]::Zero)
-    if ($consoleOutput -eq [IntPtr]::new(-1)) { throw 'Cannot open console output.' }
-    try {
-        if (-not [DemoConsole]::SetCurrentConsoleFontEx($consoleOutput, $false, [ref]$font)) {
-            throw 'Cannot configure console font.'
-        }
-        if (-not [DemoConsole]::GetCurrentConsoleFontEx($consoleOutput, $false, [ref]$font)) {
-            throw 'Cannot inspect console font.'
-        }
-        [uint32] $mode = 0
-        if (-not [DemoConsole]::GetConsoleMode($consoleOutput, [ref]$mode) -or
-            -not [DemoConsole]::SetConsoleMode($consoleOutput, $mode -bor 4)) {
-            throw 'Cannot enable console VT output.'
-        }
-    } finally {
-        [void][DemoConsole]::CloseHandle($consoleOutput)
+    $consoleOutput = [DemoConsole]::GetStdHandle(-11)
+    if ([DemoConsole]::GetFileType($consoleOutput) -ne 2) { throw 'Console output is redirected.' }
+    if (-not [DemoConsole]::SetCurrentConsoleFontEx($consoleOutput, $false, [ref]$font)) {
+        throw 'Cannot configure console font.'
+    }
+    if (-not [DemoConsole]::GetCurrentConsoleFontEx($consoleOutput, $false, [ref]$font) -or $font.Dimensions.Y -ne 18) {
+        throw 'Windows did not apply the requested console font.'
+    }
+    [uint32] $mode = 0
+    if (-not [DemoConsole]::GetConsoleMode($consoleOutput, [ref]$mode) -or
+        -not [DemoConsole]::SetConsoleMode($consoleOutput, $mode -bor 4)) {
+        throw 'Cannot enable console VT output.'
     }
     [void][DemoConsole]::ShowWindow($window, 3)
     [void][DemoConsole]::SetForegroundWindow($window)
